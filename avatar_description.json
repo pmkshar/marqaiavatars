@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "**Gender:** Male  \n**Age Range:** 30–40 years  \n\n**Facial Features:**  \n- Medium skin tone with warm undertones  \n- Dark brown eyes, almond-shaped with a direct, confident gaze  \n- Well-defined, neatly groomed black mustache (no beard)  \n- Oval face shape with a strong jawline and subtle cheekbones  \n- Straight nose; lips closed in a neutral, composed expression  \n\n**Hairstyle:**  \n- Thick, jet-black hair with natural volume  \n- Short-to-medium length (approximately 2–3 inches on top)  \n- Slightly wavy texture, styled casually with a side part or brushed forward  \n- Cleanly trimmed sides (not shaved, but neat)  \n\n**Clothing:**  \n- **Outerwear:** Black pinstripe suit jacket/blazer with notched lapels, tailored fit  \n- **Shirt:** Light pink or pale lavender dress shirt, buttoned to the collar (no tie visible)  \n- **Style:** Business-formal with a touch of modern flair due to the shirt color choice  \n\n**Overall Impression:**  \nProjects a polished, professional demeanor suitable for corporate or creative industries. The combination of the structured suit with the softer shirt color suggests approachability balanced with authority. The grooming is meticulous but not overly stylized, indicating attention to detail. Ideal for AI avatar contexts requiring trustworthiness, competence, or artistic credibility.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1787739263,
+  "id": "20260826181418e7a80b692105432a",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20260826181418e7a80b692105432a",
+  "usage": {
+    "completion_tokens": 288,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 193,
+    "prompt_tokens_details": {
+      "cached_tokens": 4
+    },
+    "total_tokens": 481
+  }
+}

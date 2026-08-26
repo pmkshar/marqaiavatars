@@ -2,13 +2,21 @@
 
 import { motion } from 'framer-motion';
 import { Volume2, VolumeX, Mic2, Square } from 'lucide-react';
-import Image from 'next/image';
 import { useEffect, useRef } from 'react';
-import { AVATAR_PROFILE } from '@/lib/avatar-profile';
 import { useAvatarStore } from '@/lib/store';
 import { AgentIcon } from './agent-icon';
+import { TalkingAvatar } from './talking-avatar';
 
+/**
+ * AvatarStage — the left-column showcase.
+ * Combines:
+ *   - TalkingAvatar (the photorealistic portrait with face animations)
+ *   - Identity card (avatar name + agent role + product)
+ *   - Voice controls (auto-voice, mute, stop)
+ *   - Hidden <audio> element driven by the store
+ */
 export function AvatarStage() {
+  const avatar = useAvatarStore((s) => s.currentAvatar);
   const agent = useAvatarStore((s) => s.currentAgent);
   const phase = useAvatarStore((s) => s.phase);
   const muted = useAvatarStore((s) => s.muted);
@@ -25,111 +33,27 @@ export function AvatarStage() {
   }, [setAudioEl]);
 
   const speaking = phase === 'speaking';
-  const thinking = phase === 'thinking';
 
   return (
     <div
-      className="avatar-bg relative flex flex-col items-center gap-6 rounded-3xl border border-border/70 bg-card/60 p-6 backdrop-blur-sm sm:p-8"
+      className="avatar-bg relative flex flex-col items-center gap-5 rounded-3xl border border-border/70 bg-card/60 p-5 backdrop-blur-sm sm:p-6"
       style={
         { ['--avatar-accent' as string]: agent.accent } as React.CSSProperties
       }
     >
-      {/* Avatar visual */}
-      <div className="flex flex-col items-center gap-4">
-        <div className="relative h-44 w-44 sm:h-52 sm:w-52">
-          {/* Pulsing halo while speaking */}
-          {speaking && (
-            <div
-              className="avatar-pulse absolute inset-0 rounded-full"
-              style={
-                {
-                  ['--avatar-glow' as string]: agent.accent,
-                } as React.CSSProperties
-              }
-              aria-hidden
-            />
-          )}
-
-          {/* Spinning gradient ring */}
-          <motion.div
-            className="absolute -inset-1 rounded-full opacity-90 blur-[6px]"
-            style={{ backgroundImage: `linear-gradient(135deg, ${agent.accent}, transparent 70%)` }}
-            animate={{ rotate: speaking ? 360 : 0 }}
-            transition={{
-              duration: speaking ? 6 : 0,
-              ease: 'linear',
-              repeat: speaking ? Infinity : 0,
-            }}
-            aria-hidden
-          />
-
-          {/* Avatar photo */}
-          <motion.div
-            className={`relative h-44 w-44 overflow-hidden rounded-full border-4 border-background shadow-xl sm:h-52 sm:w-52 ${speaking ? '' : 'avatar-float'}`}
-            animate={
-              speaking
-                ? { scale: [1, 1.02, 1] }
-                : { scale: 1 }
-            }
-            transition={
-              speaking
-                ? { duration: 1.2, repeat: Infinity, ease: 'easeInOut' }
-                : { duration: 0.3 }
-            }
-          >
-            <Image
-              src={AVATAR_PROFILE.image}
-              alt={`${agent.name} \u2014 ${agent.role}`}
-              fill
-              sizes="(max-width: 640px) 11rem, 13rem"
-              priority
-              className="object-cover"
-            />
-            {/* Subtle gradient wash that tints the avatar with the agent's accent */}
-            <div
-              className="pointer-events-none absolute inset-0 mix-blend-soft-light"
-              style={{
-                background: `linear-gradient(140deg, ${agent.accent}55, transparent 60%)`,
-              }}
-              aria-hidden
-            />
-          </motion.div>
-
-          {/* Status pill */}
-          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-border bg-background/95 px-3 py-1 text-xs font-medium shadow-sm">
-            {speaking ? (
-              <span className="flex items-center gap-1.5" style={{ color: agent.accent }}>
-                <EqualizerBars />
-                Speaking
-              </span>
-            ) : thinking ? (
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="typing-dot inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                <span className="typing-dot inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                <span className="typing-dot inline-block h-1.5 w-1.5 rounded-full bg-current" />
-                Thinking
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                Ready
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
+      <TalkingAvatar />
 
       {/* Identity card */}
       <div className="flex w-full flex-col items-center gap-1 text-center">
         <div className="flex items-center gap-2">
           <span
-            className="flex h-7 w-7 items-center justify-center rounded-full text-white"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-white"
             style={{ backgroundColor: agent.accent }}
             aria-hidden
           >
-            <AgentIcon name={agent.icon} className="h-4 w-4" />
+            <AgentIcon name={agent.icon} className="h-3.5 w-3.5" />
           </span>
-          <h2 className="text-xl font-semibold tracking-tight">{agent.name}</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{avatar.name}</h2>
         </div>
         <p className="text-sm font-medium text-muted-foreground">{agent.role}</p>
         <div
@@ -138,7 +62,9 @@ export function AvatarStage() {
         >
           {agent.product}
         </div>
-        <p className="mt-2 max-w-xs text-sm text-muted-foreground">{agent.tagline}</p>
+        <p className="mt-1.5 max-w-xs text-xs text-muted-foreground">
+          {agent.tagline}
+        </p>
       </div>
 
       {/* Voice controls */}
@@ -202,17 +128,5 @@ function ControlButton({
       {icon}
       <span>{label}</span>
     </button>
-  );
-}
-
-function EqualizerBars() {
-  return (
-    <span className="flex h-3 items-end gap-0.5" aria-hidden>
-      <span className="eq-bar" />
-      <span className="eq-bar" />
-      <span className="eq-bar" />
-      <span className="eq-bar" />
-      <span className="eq-bar" />
-    </span>
   );
 }

@@ -2,10 +2,11 @@
 
 import { motion } from 'framer-motion';
 import { RotateCw, AlertTriangle } from 'lucide-react';
+import Image from 'next/image';
 import ReactMarkdown from 'react-markdown';
 import { getAgent } from '@/lib/agents';
+import { getAvatar } from '@/lib/avatars';
 import { type ChatMessage, useAvatarStore } from '@/lib/store';
-import { AgentIcon } from './agent-icon';
 
 interface Props {
   message: ChatMessage;
@@ -14,6 +15,7 @@ interface Props {
 export function MessageBubble({ message }: Props) {
   const isUser = message.role === 'user';
   const agent = getAgent(message.agentId);
+  const avatar = getAvatar(message.avatarId);
   const phase = useAvatarStore((s) => s.phase);
   const replay = useAvatarStore((s) => s.replay);
   const muted = useAvatarStore((s) => s.muted);
@@ -33,12 +35,14 @@ export function MessageBubble({ message }: Props) {
     >
       {/* Avatar / user pill */}
       {!isUser ? (
-        <div
-          className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white"
-          style={{ backgroundColor: agent.accent }}
-          aria-hidden
-        >
-          <AgentIcon name={agent.icon} className="h-4 w-4" />
+        <div className="mt-0.5 h-8 w-8 shrink-0 overflow-hidden rounded-full border-2 border-background shadow-sm">
+          <Image
+            src={avatar.image}
+            alt={avatar.name}
+            width={32}
+            height={32}
+            className="h-full w-full object-cover"
+          />
         </div>
       ) : (
         <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
@@ -89,7 +93,7 @@ export function MessageBubble({ message }: Props) {
         {!isUser && !isPending && !isError && (
           <div className="flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
             <span className="font-medium" style={{ color: agent.accent }}>
-              {agent.name} · {agent.role}
+              {avatar.name} · {agent.role}
             </span>
             {message.pendingAudio && (
               <span className="inline-flex items-center gap-1 text-muted-foreground">

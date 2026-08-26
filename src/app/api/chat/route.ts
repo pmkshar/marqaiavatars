@@ -1,26 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
-import { getAgent } from '@/lib/agents';
+import { getAgent, resolveSystemPrompt } from '@/lib/agents';
 
 // In-memory conversation store keyed by sessionId.
-// Each session keeps the last N messages per agent so the avatar can
-// hold a coherent conversation in any persona.
+// Each session keeps the last N messages per (agent+avatar) pair so the
+// avatar can hold a coherent conversation in any persona.
 type Msg = { role: 'user' | 'assistant'; content: string };
 const sessions = new Map<string, Record<string, Msg[]>>();
 const MAX_MESSAGES = 12;
 
-function getHistory(sessionId: string, agentId: string): Msg[] {
+function getHistory(sessionId: string, key: string): Msg[] {
   if (!sessions.has(sessionId)) sessions.set(sessionId, {});
-  const byAgent = sessions.get(sessionId)!;
-  if (!byAgent[agentId]) byAgent[agentId] = [];
-  return byAgent[agentId];
+  const byKey = sessions.get(sessionId)!;
+  if (!byKey[key]) byKey[key] = [];
+  return byKey[key];
 }
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {
-    const { sessionId, agentId, message } = await req.json();
+    const { sessionId, agentId, avatarName, message } = await req.json();
 
     if (!sessionId || !agentId || !message || typeof message !== 'string') {
       return NextResponse.json(
@@ -30,14 +30,18 @@ export async function POST(req: NextRequest) {
     }
 
     const agent = getAgent(agentId);
+    const displayName = (typeof avatarName === 'string' && avatarName.trim()) || 'the assistant';
+    const systemPrompt = resolveSystemPrompt(agent, displayName);
 
     const zai = await ZAI.create();
 
+    // Conversation history is keyed by agent so switching avatars mid-conversation
+    // doesn't reset context, but switching agents does.
     const history = getHistory(sessionId, agent.id);
 
     // Build messages: system prompt as assistant bootstrap, then history, then new user msg
     const messages: { role: 'assistant' | 'user'; content: string }[] = [
-      { role: 'assistant', content: agent.systemPrompt },
+      { role: 'assistant', content: systemPrompt },
       ...history,
       { role: 'user', content: message },
     ];
@@ -59,7 +63,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({
-      agent: { id: agent.id, name: agent.name, role: agent.role, voice: agent.voice, speed: agent.speed },
+      agent: { id: agent.id, role: agent.role, voice: agent.voice, speed: agent.speed },
       reply,
     });
   } catch (err: unknown) {

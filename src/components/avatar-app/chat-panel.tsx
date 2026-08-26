@@ -9,6 +9,7 @@ import { MessageBubble } from './message-bubble';
 
 export function ChatPanel() {
   const agent = useAvatarStore((s) => s.currentAgent);
+  const avatar = useAvatarStore((s) => s.currentAvatar);
   const messages = useAvatarStore((s) => s.messages);
   const phase = useAvatarStore((s) => s.phase);
   const error = useAvatarStore((s) => s.error);
@@ -54,9 +55,12 @@ export function ChatPanel() {
         aria-live="polite"
       >
         {messages.length === 0 ? (
-          // `key={agent.id}` remounts EmptyState when the agent changes,
-          // which naturally resets its local "starter hidden" state.
-          <EmptyState key={agent.id} onPickStarter={(text) => setInput(text)} />
+          // `key` includes both avatar + agent so EmptyState resets
+          // whenever either changes.
+          <EmptyState
+            key={`${avatar.id}-${agent.id}`}
+            onPickStarter={(text) => setInput(text)}
+          />
         ) : (
           <div className="flex flex-col gap-4">
             <AnimatePresence initial={false}>
@@ -83,7 +87,7 @@ export function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={`Ask ${agent.name} about ${agent.product}\u2026`}
+          placeholder={`Ask ${avatar.name} about ${agent.product}…`}
           rows={1}
           className="max-h-32 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground"
           disabled={busy}
@@ -123,6 +127,7 @@ function EmptyState({
   onPickStarter: (text: string) => void;
 }) {
   const agent = useAvatarStore((s) => s.currentAgent);
+  const avatar = useAvatarStore((s) => s.currentAvatar);
   const [starterHidden, setStarterHidden] = useState(false);
   return (
     <motion.div
@@ -136,12 +141,12 @@ function EmptyState({
         aria-hidden
       >
         <span className="text-xl font-semibold tracking-tight">
-          {agent.name.charAt(0)}
+          {avatar.name.charAt(0)}
         </span>
       </div>
       <div className="space-y-1">
         <h3 className="text-base font-semibold">
-          {agent.name} · {agent.role}
+          {avatar.name} · {agent.role}
         </h3>
         <p className="mx-auto max-w-sm text-sm text-muted-foreground">
           {agent.description}

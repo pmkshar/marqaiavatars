@@ -1,8 +1,8 @@
 /**
  * Product voice agents — each one is a distinct persona the AI avatar
- * can take on. They share the same face (the uploaded portrait) but
- * speak with different tones, expertise, and TTS voices for different
- * product lines.
+ * can take on. The face (avatar identity) is decoupled from the agent:
+ * the user picks any face from `avatars.ts` and any agent here, and
+ * the avatar speaks with that agent's tone, expertise, and TTS voice.
  *
  * IMPORTANT: voice values must match the z-ai-web-dev-sdk TTS voices
  * (tongtong, chuichui, xiaochen, jam, kazi, douji, luodo).
@@ -17,15 +17,12 @@ export type AgentId =
 
 export interface ProductAgent {
   id: AgentId;
-  name: string;
   role: string;
   product: string;
   tagline: string;
   description: string;
   /** lucide-react icon name */
   icon: 'trending-up' | 'heart-handshake' | 'cpu' | 'megaphone' | 'play-circle';
-  /** Tailwind gradient classes for the avatar halo */
-  gradient: string;
   /** Solid accent color (hex) for borders / chips */
   accent: string;
   /** Soft accent background (rgba) for chips */
@@ -34,7 +31,7 @@ export interface ProductAgent {
   voice: 'tongtong' | 'chuichui' | 'xiaochen' | 'jam' | 'kazi' | 'douji' | 'luodo';
   /** Suggested speech speed for this persona */
   speed: number;
-  /** System prompt injected before every conversation */
+  /** System prompt template. {name} is replaced at runtime with the avatar's name. */
   systemPrompt: string;
   /** Starter prompt suggestions shown as quick chips */
   starters: string[];
@@ -43,19 +40,17 @@ export interface ProductAgent {
 export const AGENTS: ProductAgent[] = [
   {
     id: 'sales',
-    name: 'Aarav',
     role: 'Sales Representative',
     product: 'InsightForge Analytics',
     tagline: 'Close more deals with data',
     description:
       'Confident, outcome-driven SaaS sales rep. Talks ROI, qualification, and pricing for an enterprise analytics suite.',
     icon: 'trending-up',
-    gradient: 'from-amber-500 via-orange-500 to-rose-500',
     accent: '#f97316',
     accentSoft: 'rgba(249, 115, 22, 0.12)',
     voice: 'xiaochen',
     speed: 1.0,
-    systemPrompt: `You are Aarav, a senior sales representative for InsightForge Analytics — an enterprise-grade product analytics platform that unifies customer journey data, predictive churn modeling, and self-serve dashboards.
+    systemPrompt: `You are {name}, a senior sales representative for InsightForge Analytics — an enterprise-grade product analytics platform that unifies customer journey data, predictive churn modeling, and self-serve dashboards.
 
 Your job: help prospects understand value, qualify fit, handle objections, and move toward a discovery call or trial.
 
@@ -74,19 +69,17 @@ Style guidelines:
   },
   {
     id: 'success',
-    name: 'Aarav',
     role: 'Customer Success Manager',
     product: 'Nimbus CRM',
     tagline: 'Onboarding that sticks',
     description:
       'Warm, patient CSM. Helps users adopt Nimbus CRM, troubleshoot issues, and unlock value across the customer lifecycle.',
     icon: 'heart-handshake',
-    gradient: 'from-emerald-500 via-teal-500 to-cyan-500',
     accent: '#10b981',
     accentSoft: 'rgba(16, 185, 129, 0.12)',
     voice: 'tongtong',
     speed: 0.95,
-    systemPrompt: `You are Aarav, a Customer Success Manager for Nimbus CRM — a sales CRM with email sync, pipeline automation, and AI-suggested next steps.
+    systemPrompt: `You are {name}, a Customer Success Manager for Nimbus CRM — a sales CRM with email sync, pipeline automation, and AI-suggested next steps.
 
 Your job: onboard new accounts, unblock users, drive adoption, and proactively surface expansion opportunities.
 
@@ -105,19 +98,17 @@ Style guidelines:
   },
   {
     id: 'tech',
-    name: 'Aarav',
     role: 'Technical Solutions Engineer',
     product: 'Stratus Cloud',
     tagline: 'Architecture, demystified',
     description:
       'Sharp, precise TSE. Walks developers through Stratus Cloud infra, debugging, integrations, and best practices.',
     icon: 'cpu',
-    gradient: 'from-slate-600 via-zinc-700 to-stone-800',
     accent: '#64748b',
     accentSoft: 'rgba(100, 116, 139, 0.14)',
     voice: 'kazi',
     speed: 1.05,
-    systemPrompt: `You are Aarav, a Technical Solutions Engineer for Stratus Cloud — a serverless cloud platform with edge functions, managed Postgres, and built-in observability.
+    systemPrompt: `You are {name}, a Technical Solutions Engineer for Stratus Cloud — a serverless cloud platform with edge functions, managed Postgres, and built-in observability.
 
 Your job: help developers integrate, debug, and architect on Stratus. You translate vague symptoms into root causes.
 
@@ -136,19 +127,17 @@ Style guidelines:
   },
   {
     id: 'marketing',
-    name: 'Aarav',
     role: 'Brand Marketing Lead',
     product: 'Lumen Lifestyle',
     tagline: 'Stories that move people',
     description:
       'Charismatic storyteller. Crafts brand narratives, campaign angles, and emotional hooks for Lumen Lifestyle.',
     icon: 'megaphone',
-    gradient: 'from-fuchsia-500 via-pink-500 to-rose-500',
     accent: '#d946ef',
     accentSoft: 'rgba(217, 70, 239, 0.12)',
     voice: 'luodo',
     speed: 1.0,
-    systemPrompt: `You are Aarav, Brand Marketing Lead for Lumen Lifestyle — a premium D2C brand selling minimalist home goods and ambient lighting.
+    systemPrompt: `You are {name}, Brand Marketing Lead for Lumen Lifestyle — a premium D2C brand selling minimalist home goods and ambient lighting.
 
 Your job: shape campaign angles, brand messaging, and emotional hooks that turn browsers into believers.
 
@@ -166,19 +155,17 @@ Style guidelines:
   },
   {
     id: 'demo',
-    name: 'Aarav',
     role: 'Product Demo Guide',
     product: 'Flux Mobile',
     tagline: 'Show, don\u2019t tell',
     description:
       'Energetic, friendly demo host. Walks prospects through Flux Mobile features in a guided, interactive way.',
     icon: 'play-circle',
-    gradient: 'from-sky-500 via-indigo-500 to-violet-500',
     accent: '#0ea5e9',
     accentSoft: 'rgba(14, 165, 233, 0.12)',
     voice: 'chuichui',
     speed: 1.1,
-    systemPrompt: `You are Aarav, the interactive demo guide for Flux Mobile — a habit-tracking app with streaks, social challenges, and AI-suggested routines.
+    systemPrompt: `You are {name}, the interactive demo guide for Flux Mobile — a habit-tracking app with streaks, social challenges, and AI-suggested routines.
 
 Your job: walk visitors through key features in a guided, interactive demo, one screen at a time.
 
@@ -200,4 +187,9 @@ export const DEFAULT_AGENT_ID: AgentId = 'sales';
 
 export function getAgent(id: AgentId | string | undefined): ProductAgent {
   return AGENTS.find((a) => a.id === id) ?? AGENTS[0];
+}
+
+/** Render the agent's system prompt with the avatar's display name injected. */
+export function resolveSystemPrompt(agent: ProductAgent, name: string): string {
+  return agent.systemPrompt.replace(/\{name\}/g, name);
 }

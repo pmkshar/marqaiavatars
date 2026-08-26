@@ -1,13 +1,15 @@
 'use client';
 
 import { create } from 'zustand';
-import { AGENTS, type AgentId, type ProductAgent } from './agents';
+import { AGENTS, resolveSystemPrompt, type AgentId, type ProductAgent } from './agents';
+import { AVATARS, getAvatar, type AvatarId, type AvatarIdentity } from './avatars';
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   agentId: AgentId;
+  avatarId: AvatarId;
   audioUrl?: string; // object URL for cached TTS audio
   pendingAudio?: boolean;
   createdAt: number;
@@ -17,6 +19,7 @@ type Phase = 'idle' | 'thinking' | 'speaking';
 
 interface AvatarState {
   sessionId: string;
+  currentAvatar: AvatarIdentity;
   currentAgent: ProductAgent;
   messages: ChatMessage[];
   phase: Phase;
@@ -26,6 +29,7 @@ interface AvatarState {
   // ref-style state (non-serializable but fine for zustand)
   audioEl: HTMLAudioElement | null;
 
+  setAvatar: (id: AvatarId) => void;
   setAgent: (id: AgentId) => void;
   toggleAutoSpeak: () => void;
   toggleMuted: () => void;
@@ -68,6 +72,7 @@ async function fetchTTS(text: string, agent: ProductAgent): Promise<Blob> {
 
 export const useAvatarStore = create<AvatarState>((set, get) => ({
   sessionId: typeof window !== 'undefined' ? makeSessionId() : 'ssr',
+  currentAvatar: AVATARS[0],
   currentAgent: AGENTS[0],
   messages: [],
   phase: 'idle',
@@ -76,10 +81,19 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
   muted: false,
   audioEl: null,
 
+  setAvatar: (id) => {
+    const avatar = getAvatar(id);
+    set({ currentAvatar: avatar, phase: 'idle', error: null });
+    const el = get().audioEl;
+    if (el) {
+      el.pause();
+      el.currentTime = 0;
+    }
+  },
+
   setAgent: (id) => {
     const agent = AGENTS.find((a) => a.id === id) ?? AGENTS[0];
     set({ currentAgent: agent, phase: 'idle', error: null });
-    // Stop any playing audio when switching agents
     const el = get().audioEl;
     if (el) {
       el.pause();
@@ -101,13 +115,14 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
   sendMessage: async (text) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const { sessionId, currentAgent: agent, autoSpeak, muted } = get();
+    const { sessionId, currentAgent: agent, currentAvatar: avatar, autoSpeak, muted } = get();
 
     const userMsg: ChatMessage = {
       id: makeId(),
       role: 'user',
       content: trimmed,
       agentId: agent.id,
+      avatarId: avatar.id,
       createdAt: Date.now(),
     };
     const pendingAssistantId = makeId();
@@ -116,6 +131,7 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
       role: 'assistant',
       content: '',
       agentId: agent.id,
+      avatarId: avatar.id,
       pendingAudio: autoSpeak && !muted,
       createdAt: Date.now() + 1,
     };
@@ -130,7 +146,12 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, agentId: agent.id, message: trimmed }),
+        body: JSON.stringify({
+          sessionId,
+          agentId: agent.id,
+          avatarName: avatar.name,
+          message: trimmed,
+        }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -162,6 +183,7 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
             role: 'assistant',
             content: `\u26a0\ufe0f ${msg}`,
             agentId: agent.id,
+            avatarId: avatar.id,
             createdAt: Date.now(),
           }),
       }));
@@ -249,3 +271,7 @@ async function playReply(
     }));
   }
 }
+
+// Re-export for components that still import from store
+export { AGENTS, AVATARS, getAgent, getAvatar, resolveSystemPrompt };
+export type { AgentId, AvatarId, AvatarIdentity, ProductAgent };

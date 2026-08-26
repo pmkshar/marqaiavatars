@@ -101,7 +101,18 @@ export function MessageBubble({ message }: Props) {
                 Generating voice…
               </span>
             )}
-            {!message.pendingAudio && message.audioUrl && !muted && (
+            {message.ttsFailed && !muted && (
+              <button
+                type="button"
+                onClick={() => replay(message.id)}
+                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-700 transition-colors hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300"
+                aria-label="Retry voice generation"
+              >
+                <RotateCw className="h-3 w-3" />
+                Retry voice
+              </button>
+            )}
+            {!message.pendingAudio && !message.ttsFailed && message.audioUrl && !muted && (
               <button
                 type="button"
                 onClick={() => replay(message.id)}

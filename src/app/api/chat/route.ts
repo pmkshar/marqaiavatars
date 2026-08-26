@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
 import { getAgent, resolveSystemPrompt } from '@/lib/agents';
+import { getLanguage } from '@/lib/languages';
 
 // In-memory conversation store keyed by sessionId.
-// Each session keeps the last N messages per (agent+avatar) pair so the
-// avatar can hold a coherent conversation in any persona.
+// Each session keeps the last N messages per agent so the avatar can
+// hold a coherent conversation in any persona.
 type Msg = { role: 'user' | 'assistant'; content: string };
 const sessions = new Map<string, Record<string, Msg[]>>();
 const MAX_MESSAGES = 12;
@@ -20,7 +21,7 @@ export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {
-    const { sessionId, agentId, avatarName, message } = await req.json();
+    const { sessionId, agentId, avatarName, languageId, message } = await req.json();
 
     if (!sessionId || !agentId || !message || typeof message !== 'string') {
       return NextResponse.json(
@@ -31,13 +32,20 @@ export async function POST(req: NextRequest) {
 
     const agent = getAgent(agentId);
     const displayName = (typeof avatarName === 'string' && avatarName.trim()) || 'the assistant';
-    const systemPrompt = resolveSystemPrompt(agent, displayName);
+    const language = getLanguage(languageId);
+
+    // Build the system prompt: agent persona + name + language instruction.
+    // The language instruction tells the model to respond in the selected
+    // language using the appropriate script.
+    const systemPrompt = `${resolveSystemPrompt(agent, displayName)}
+
+LANGUAGE: ${language.instruction}`;
 
     const zai = await ZAI.create();
 
-    // Conversation history is keyed by agent so switching avatars mid-conversation
-    // doesn't reset context, but switching agents does.
-    const history = getHistory(sessionId, agent.id);
+    // Conversation history is keyed by `${agent.id}:${language.id}` so
+    // switching language starts a fresh context but switching avatar doesn't.
+    const history = getHistory(sessionId, `${agent.id}:${language.id}`);
 
     // Build messages: system prompt as assistant bootstrap, then history, then new user msg
     const messages: { role: 'assistant' | 'user'; content: string }[] = [
@@ -64,6 +72,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       agent: { id: agent.id, role: agent.role, voice: agent.voice, speed: agent.speed },
+      language: { id: language.id, native: language.native },
       reply,
     });
   } catch (err: unknown) {

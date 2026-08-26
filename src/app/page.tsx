@@ -4,6 +4,7 @@ import { Sparkles } from 'lucide-react';
 import { AvatarStage } from '@/components/avatar-app/avatar-stage';
 import { AvatarPicker } from '@/components/avatar-app/avatar-picker';
 import { ChatPanel } from '@/components/avatar-app/chat-panel';
+import { LanguagePicker } from '@/components/avatar-app/language-picker';
 import { ThemeToggle } from '@/components/avatar-app/theme-toggle';
 
 export default function Home() {
@@ -27,7 +28,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <span className="hidden rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground sm:inline-flex">
-              4 AI faces · 5 product voices
+              4 faces · 5 voices · 5 languages
             </span>
             <ThemeToggle />
           </div>
@@ -48,6 +49,13 @@ export default function Home() {
             </p>
             <AvatarPicker />
           </div>
+          {/* Language picker — selects conversation language */}
+          <div className="mt-2 rounded-2xl border border-border/70 bg-card/40 p-2.5 backdrop-blur-sm">
+            <p className="mb-1.5 px-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Voice language
+            </p>
+            <LanguagePicker />
+          </div>
         </section>
         <section
           aria-label="Conversation"
@@ -64,7 +72,7 @@ export default function Home() {
             Built with Next.js 16 · Tailwind · Z.ai SDK (LLM + TTS + image-gen)
           </p>
           <p className="text-center sm:text-right">
-            4 photorealistic AI faces with breathing, blinking &amp; lip-sync motion.
+            Real lip-sync, micro-expressions &amp; 5 Indian languages.
           </p>
         </div>
       </footer>

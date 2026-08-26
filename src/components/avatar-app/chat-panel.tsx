@@ -10,11 +10,13 @@ import { MessageBubble } from './message-bubble';
 export function ChatPanel() {
   const agent = useAvatarStore((s) => s.currentAgent);
   const avatar = useAvatarStore((s) => s.currentAvatar);
+  const language = useAvatarStore((s) => s.currentLanguage);
   const messages = useAvatarStore((s) => s.messages);
   const phase = useAvatarStore((s) => s.phase);
   const error = useAvatarStore((s) => s.error);
   const sendMessage = useAvatarStore((s) => s.sendMessage);
   const clearChat = useAvatarStore((s) => s.clearChat);
+  const setError = useAvatarStore((s) => s.setError);
 
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -58,7 +60,7 @@ export function ChatPanel() {
           // `key` includes both avatar + agent so EmptyState resets
           // whenever either changes.
           <EmptyState
-            key={`${avatar.id}-${agent.id}`}
+            key={`${avatar.id}-${agent.id}-${language.id}`}
             onPickStarter={(text) => setInput(text)}
           />
         ) : (
@@ -72,8 +74,16 @@ export function ChatPanel() {
         )}
 
         {error && (
-          <div className="mt-4 rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300">
-            {error}
+          <div className="mt-4 flex items-start justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300">
+            <span className="flex-1">{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              aria-label="Dismiss error"
+              className="shrink-0 rounded px-1 text-amber-700/70 hover:bg-amber-100 hover:text-amber-700 dark:text-amber-300/70 dark:hover:bg-amber-900"
+            >
+              ×
+            </button>
           </div>
         )}
       </div>
@@ -87,7 +97,7 @@ export function ChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={`Ask ${avatar.name} about ${agent.product}…`}
+          placeholder={`Ask ${avatar.name} about ${agent.product} (${language.native})…`}
           rows={1}
           className="max-h-32 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground"
           disabled={busy}

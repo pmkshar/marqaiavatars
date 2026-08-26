@@ -3,37 +3,27 @@
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import { useAvatarStore } from '@/lib/store';
-import { AgentIcon } from './agent-icon';
+import { TalkingMouth } from './talking-mouth';
+import { FacialExpressions } from './facial-expressions';
 
 /**
- * TalkingAvatar — renders a photorealistic portrait with layered CSS
- * overlays that simulate a living, speaking human:
+ * TalkingAvatar — renders a photorealistic portrait with a real talking
+ * mouth overlay and layered facial-expression overlays.
  *
- *   ┌─────────────────────────────┐
- *   │  spinning gradient ring      │  ← Framer Motion
- *   │  ┌───────────────────────┐   │
- *   │  │  portrait (Image)      │   │  ← breathing + head sway
- *   │  │   ┌─ eye-blink overlay │  │  ← scaleY collapse every ~5s
- *   │  │   ├─ eye-blink delay   │  │  ← second blink, offset phase
- *   │  │   └─ mouth-overlay     │  │  ← pulses while speaking
- *   │  │   ┌─ face vignette      │  │  ← radial focus on face
- *   │  │   └─ face warmth        │  │  ← warm color wash from below
- *   │  └───────────────────────┘   │
- *   │  status pill (Ready/Think/  │
- *   │  Speaking + equalizer)      │
- *   └─────────────────────────────┘
+ * Layout (top to bottom, percentages are of the portrait container):
+ *   24% — eyebrows (FacialExpressions handles raise)
+ *   34% — eyes + eye-blink overlays + eye glints
+ *   55% — nose tip
+ *   70% — mouth (TalkingMouth — viseme-morphing interior + teeth)
+ *   52% — cheek blush (FacialExpressions)
+ *   78% — jaw shadow (FacialExpressions)
  *
- * State machine:
- *   idle      → breathing + sway + slow aura + periodic blinks
- *   thinking  → head-tilt animation + think-aura
- *   speaking  → speak-body lean + mouth-overlay pulse + fast aura + blinks
+ * The portrait itself only has very subtle breathing — no fake leaning.
  */
 export function TalkingAvatar() {
   const avatar = useAvatarStore((s) => s.currentAvatar);
   const agent = useAvatarStore((s) => s.currentAgent);
   const phase = useAvatarStore((s) => s.phase);
-  // messages.length increases every time a new speak session starts,
-  // so we use it as a stable key to restart the mouth animation cleanly.
   const speakSessionKey = useAvatarStore((s) => s.messages.length);
 
   const speaking = phase === 'speaking';
@@ -59,7 +49,7 @@ export function TalkingAvatar() {
       {/* Spinning gradient ring while speaking */}
       {speaking && (
         <motion.div
-          className="absolute -inset-1 rounded-2xl opacity-80 blur-[5px]"
+          className="absolute -inset-1 rounded-2xl opacity-70 blur-[5px]"
           style={{
             backgroundImage: `linear-gradient(135deg, ${agent.accent}, transparent 70%)`,
           }}
@@ -69,19 +59,13 @@ export function TalkingAvatar() {
         />
       )}
 
-      {/* The portrait — breathing + state-driven body animation */}
+      {/* The portrait — only very subtle breathing (no fake leaning) */}
       <motion.div
         key={avatar.id}
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5, ease: 'easeOut' }}
-        className={`absolute inset-0 ${
-          speaking
-            ? 'avatar-speak-body'
-            : thinking
-              ? 'avatar-think'
-              : 'avatar-sway avatar-breathe'
-        }`}
+        className="avatar-breathe absolute inset-0"
       >
         <Image
           src={avatar.image}
@@ -92,33 +76,33 @@ export function TalkingAvatar() {
           className="object-cover"
         />
 
-        {/* Eye blink overlays — positioned over the upper third of the face */}
+        {/* Eye blink overlays — quick scaleY collapse on the eye area */}
         <div
-          className="eye-blink absolute left-[18%] right-[58%] top-[34%] h-[5%] rounded-full"
+          className="eye-blink absolute left-[20%] right-[58%] top-[35%] h-[4%] rounded-full"
           aria-hidden
         />
         <div
-          className="eye-blink delay absolute left-[58%] right-[18%] top-[34%] h-[5%] rounded-full"
+          className="eye-blink delay absolute left-[58%] right-[20%] top-[35%] h-[4%] rounded-full"
           aria-hidden
         />
 
-        {/* Mouth-area overlay — only animates while speaking */}
-        {speaking && (
-          <div
-            key={`mouth-${speakSessionKey}`}
-            className="mouth-overlay absolute left-[30%] right-[30%] top-[58%] h-[10%] rounded-full"
-            style={{
-              background: `radial-gradient(ellipse at 50% 50%, ${agent.accent}80, transparent 70%)`,
-            }}
-            aria-hidden
-          />
-        )}
+        {/* Facial expressions: eyebrow raises, cheek blush, eye glints, jaw shadow */}
+        <FacialExpressions speaking={speaking} thinking={thinking} accent={agent.accent} />
 
-        {/* Face warmth — subtle bottom-up color wash */}
-        <div className="face-warmth absolute inset-0" aria-hidden />
+        {/* The talking mouth — viseme-morphing interior with visible teeth */}
+        <TalkingMouth
+          key={`mouth-${speakSessionKey}-${avatar.id}`}
+          speaking={speaking}
+          accent={agent.accent}
+          topPct={70}
+          widthPct={22}
+        />
 
         {/* Vignette — radial focus on the face */}
         <div className="face-vignette absolute inset-0" aria-hidden />
+
+        {/* Subtle warm color wash */}
+        <div className="face-warmth absolute inset-0" aria-hidden />
       </motion.div>
 
       {/* Status pill — bottom center */}

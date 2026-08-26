@@ -3,38 +3,140 @@ import ZAI from 'z-ai-web-dev-sdk';
 import { getAgent } from '@/lib/agents';
 
 export const runtime = 'nodejs';
-// Always regenerate speech — never cache a stale audio blob
 export const dynamic = 'force-dynamic';
 
-// Split long text into <=900 char chunks at sentence boundaries so we stay
-// well under the 1024-char TTS limit per request, then concatenate the
-// resulting WAV blobs.
-function splitText(text: string, maxLen = 900): string[] {
+/**
+ * Split text into chunks at sentence boundaries. The TTS API is
+ * empirically unstable for long text (esp. with Devanagari / Indic
+ * scripts) — 500s start appearing around 250+ chars. We keep chunks
+ * small (<= 180 chars) for safety.
+ */
+function splitText(text: string, maxLen = 180): string[] {
   const clean = text.replace(/\s+/g, ' ').trim();
   if (clean.length <= maxLen) return [clean];
 
   const chunks: string[] = [];
-  const sentences = clean.match(/[^.!?。！？]+[.!?。！？]+|\S+$/g) || [clean];
+  // Split on sentence boundaries (Latin + Indic)
+  const sentences = clean.match(/[^.!?।॥]+[.!?।॥]+|\S+$/g) || [clean];
   let cur = '';
   for (const s of sentences) {
-    if ((cur + s).length <= maxLen) {
-      cur += s;
+    const sTrim = s.trim();
+    if (!sTrim) continue;
+    // If a single sentence is longer than maxLen, hard-split it on commas
+    // (or words as a last resort).
+    if (sTrim.length > maxLen) {
+      if (cur) {
+        chunks.push(cur.trim());
+        cur = '';
+      }
+      const sub = hardSplit(sTrim, maxLen);
+      for (let i = 0; i < sub.length; i++) {
+        if (i < sub.length - 1) chunks.push(sub[i]);
+        else cur = sub[i];
+      }
+      continue;
+    }
+    if ((cur + ' ' + sTrim).trim().length <= maxLen) {
+      cur = (cur + ' ' + sTrim).trim();
     } else {
-      if (cur) chunks.push(cur.trim());
-      cur = s.length > maxLen ? s.slice(0, maxLen) : s;
+      if (cur) chunks.push(cur);
+      cur = sTrim;
     }
   }
   if (cur.trim()) chunks.push(cur.trim());
-  return chunks;
+  return chunks.filter(Boolean);
 }
 
-// Minimal WAV header parser — we only need to merge PCM payloads that share
-// the same format. Stratus TTS returns 24kHz 16-bit mono WAV.
+function hardSplit(text: string, maxLen: number): string[] {
+  const out: string[] = [];
+  // First try commas / semicolons / dashes
+  let parts = text.split(/[,;—–]|\s-\s+/).map((s) => s.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    let cur = '';
+    for (const p of parts) {
+      if ((cur + ', ' + p).length <= maxLen) {
+        cur = cur ? cur + ', ' + p : p;
+      } else {
+        if (cur) out.push(cur);
+        cur = p.length <= maxLen ? p : p.slice(0, maxLen);
+      }
+    }
+    if (cur) out.push(cur);
+  } else {
+    // Last resort: word-boundary hard split
+    const words = text.split(' ');
+    let cur = '';
+    for (const w of words) {
+      if ((cur + ' ' + w).trim().length <= maxLen) {
+        cur = (cur + ' ' + w).trim();
+      } else {
+        if (cur) out.push(cur);
+        cur = w.length <= maxLen ? w : w.slice(0, maxLen);
+      }
+    }
+    if (cur) out.push(cur);
+  }
+  return out;
+}
+
+/**
+ * Re-build a clean WAV file from a possibly-non-standard input.
+ *
+ * The TTS provider returns WAV files with a non-standard `AIGC` metadata
+ * chunk between `fmt ` and `data`. Most browsers reject WAV files with
+ * unknown chunks (the audio element throws "no supported source found").
+ * This function extracts the `fmt ` and `data` chunks and rebuilds a
+ * clean WAV with ONLY those two chunks, in the order browsers expect.
+ */
+function rebuildCleanWav(buf: Buffer): Buffer | null {
+  if (buf.length < 44) return null;
+  if (buf.toString('ascii', 0, 4) !== 'RIFF') return null;
+  if (buf.toString('ascii', 8, 12) !== 'WAVE') return null;
+
+  let fmtChunk: Buffer | null = null;
+  let dataPcm: Buffer | null = null;
+
+  let offset = 12;
+  while (offset + 8 <= buf.length) {
+    const id = buf.toString('ascii', offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    const chunkData = buf.subarray(offset + 8, offset + 8 + size);
+    if (id === 'fmt ') {
+      fmtChunk = chunkData;
+    } else if (id === 'data') {
+      dataPcm = chunkData;
+    }
+    // Skip unknown chunks (AIGC, LIST, fact, etc.)
+    offset += 8 + size + (size % 2 === 1 ? 1 : 0);
+  }
+
+  if (!fmtChunk || !dataPcm) return null;
+
+  // Build: RIFF<size>WAVE + fmt <size><fmtData> + data<size><pcm>
+  const fmtChunkSize = fmtChunk.length;
+  const dataChunkSize = dataPcm.length;
+  const totalSize = 4 + (8 + fmtChunkSize) + (8 + dataChunkSize);
+  const out = Buffer.alloc(8 + totalSize);
+  let w = 0;
+  out.write('RIFF', w); w += 4;
+  out.writeUInt32LE(totalSize, w); w += 4;
+  out.write('WAVE', w); w += 4;
+  out.write('fmt ', w); w += 4;
+  out.writeUInt32LE(fmtChunkSize, w); w += 4;
+  fmtChunk.copy(out, w); w += fmtChunkSize;
+  if (fmtChunkSize % 2 === 1) {
+    out.writeUInt8(0, w); w += 1;
+  }
+  out.write('data', w); w += 4;
+  out.writeUInt32LE(dataChunkSize, w); w += 4;
+  dataPcm.copy(out, w); w += dataChunkSize;
+  return out;
+}
+
 function parseWav(buf: Buffer): { header: Buffer; pcm: Buffer } | null {
   if (buf.length < 44) return null;
   if (buf.toString('ascii', 0, 4) !== 'RIFF') return null;
   if (buf.toString('ascii', 8, 12) !== 'WAVE') return null;
-  // Find the "data" chunk
   let offset = 12;
   while (offset + 8 <= buf.length) {
     const id = buf.toString('ascii', offset, offset + 4);
@@ -54,21 +156,53 @@ function mergeWav(blobs: Buffer[]): Buffer {
   const parsed = blobs.map(parseWav).filter(Boolean) as { header: Buffer; pcm: Buffer }[];
   if (parsed.length === 0) return blobs[0];
   const totalPcm = parsed.reduce((sum, p) => sum + p.pcm.length, 0);
-  // Reuse the first blob's RIFF/fmt header, rewrite the sizes
   const first = blobs[0];
   const out = Buffer.alloc(first.length + totalPcm - parsed[0].pcm.length);
   first.copy(out, 0);
-  // RIFF chunk size = 4 + (8 + fmt_chunk_size) + (8 + data_size)
   const fmtSize = first.readUInt32LE(16);
   const dataChunkStart = 12 + 8 + fmtSize + (fmtSize % 2 === 1 ? 1 : 0);
-  out.writeUInt32LE(out.length - 8, 4); // RIFF size
-  out.writeUInt32LE(totalPcm, dataChunkStart + 4); // data size
+  out.writeUInt32LE(out.length - 8, 4);
+  out.writeUInt32LE(totalPcm, dataChunkStart + 4);
   let writeOffset = dataChunkStart + 8;
   for (const p of parsed) {
     p.pcm.copy(out, writeOffset);
     writeOffset += p.pcm.length;
   }
   return out;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function generateChunkWithRetry(
+  zai: Awaited<ReturnType<typeof ZAI.create>>,
+  chunk: string,
+  voice: string,
+  speed: number,
+  retries = 3
+): Promise<Buffer> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await zai.audio.tts.create({
+        input: chunk,
+        voice,
+        speed,
+        response_format: 'wav',
+        stream: false,
+      });
+      const arrayBuffer = await response.arrayBuffer();
+      const buf = Buffer.from(new Uint8Array(arrayBuffer));
+      if (buf.length < 44) throw new Error('Empty audio response');
+      return buf;
+    } catch (err) {
+      lastErr = err;
+      // Exponential backoff: 500ms, 1000ms, 2000ms
+      if (attempt < retries) {
+        await sleep(500 * Math.pow(2, attempt - 1));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 export async function POST(req: NextRequest) {
@@ -85,22 +219,50 @@ export async function POST(req: NextRequest) {
 
     const zai = await ZAI.create();
 
-    const chunks = splitText(text, 900);
+    const chunks = splitText(text, 180);
     const blobs: Buffer[] = [];
+    const failedChunks: number[] = [];
 
-    for (const chunk of chunks) {
-      const response = await zai.audio.tts.create({
-        input: chunk,
-        voice: finalVoice,
-        speed: finalSpeed,
-        response_format: 'wav',
-        stream: false,
-      });
-      const arrayBuffer = await response.arrayBuffer();
-      blobs.push(Buffer.from(new Uint8Array(arrayBuffer)));
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        const buf = await generateChunkWithRetry(zai, chunks[i], finalVoice, finalSpeed, 3);
+        blobs.push(buf);
+      } catch (err) {
+        // If a single chunk fails after retries, skip it and continue
+        // so the user gets partial audio instead of nothing.
+        console.error(`[/api/tts] chunk ${i} failed, skipping:`, chunks[i].slice(0, 50), err);
+        failedChunks.push(i);
+      }
     }
 
-    const merged = blobs.length === 1 ? blobs[0] : mergeWav(blobs);
+    if (blobs.length === 0) {
+      // Every chunk failed — surface a clearer error
+      return NextResponse.json(
+        {
+          error:
+            'Voice generation is temporarily unavailable for this text. Try again or shorten your message.',
+        },
+        { status: 503 }
+      );
+    }
+
+    // Strip non-standard chunks (AIGC, etc.) from each blob so browsers
+    // can decode the WAV. The TTS provider adds an AIGC watermark chunk
+    // that most browsers reject with "no supported source found".
+    const cleanedBlobs = blobs
+      .map((b) => rebuildCleanWav(b) || b);
+
+    // Merge if multiple chunks, then clean the merged output too (since
+    // mergeWav copies the first blob's header which may still have the
+    // AIGC chunk).
+    let merged: Buffer;
+    if (cleanedBlobs.length === 1) {
+      merged = cleanedBlobs[0];
+    } else {
+      merged = mergeWav(cleanedBlobs);
+      const reCleaned = rebuildCleanWav(merged);
+      if (reCleaned) merged = reCleaned;
+    }
 
     return new NextResponse(merged, {
       status: 200,
@@ -108,6 +270,9 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'audio/wav',
         'Content-Length': merged.length.toString(),
         'Cache-Control': 'no-store',
+        'X-Chunks-Total': String(chunks.length),
+        'X-Chunks-Ok': String(blobs.length),
+        'X-Chunks-Failed': String(failedChunks.length),
       },
     });
   } catch (err: unknown) {

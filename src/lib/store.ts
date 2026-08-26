@@ -3,6 +3,7 @@
 import { create } from 'zustand';
 import { AGENTS, resolveSystemPrompt, type AgentId, type ProductAgent } from './agents';
 import { AVATARS, getAvatar, type AvatarId, type AvatarIdentity } from './avatars';
+import { LANGUAGES, getLanguage, type LanguageId, type Language } from './languages';
 
 export interface ChatMessage {
   id: string;
@@ -10,17 +11,29 @@ export interface ChatMessage {
   content: string;
   agentId: AgentId;
   avatarId: AvatarId;
+  languageId: LanguageId;
   audioUrl?: string; // object URL for cached TTS audio
   pendingAudio?: boolean;
+  ttsFailed?: boolean; // true if TTS failed for this message (text is still visible)
   createdAt: number;
 }
 
 type Phase = 'idle' | 'thinking' | 'speaking';
 
+/**
+ * amplitudeCallback — a function that receives the current audio
+ * amplitude (0..1) ~30 times per second while the avatar is speaking.
+ * The TalkingMouth subscribes via `setAmplitudeCallback` and uses the
+ * value to drive its mouth opening size in real time, instead of using
+ * random visemes.
+ */
+type AmplitudeCallback = (amp: number) => void;
+
 interface AvatarState {
   sessionId: string;
   currentAvatar: AvatarIdentity;
   currentAgent: ProductAgent;
+  currentLanguage: Language;
   messages: ChatMessage[];
   phase: Phase;
   error: string | null;
@@ -28,12 +41,19 @@ interface AvatarState {
   muted: boolean;
   // ref-style state (non-serializable but fine for zustand)
   audioEl: HTMLAudioElement | null;
+  // Audio analysis nodes for real-time amplitude tracking (Option A lip sync)
+  audioCtx: AudioContext | null;
+  analyser: AnalyserNode | null;
+  sourceNode: MediaElementAudioSourceNode | null;
+  amplitudeCallback: AmplitudeCallback | null;
 
   setAvatar: (id: AvatarId) => void;
   setAgent: (id: AgentId) => void;
+  setLanguage: (id: LanguageId) => void;
   toggleAutoSpeak: () => void;
   toggleMuted: () => void;
   setAudioEl: (el: HTMLAudioElement | null) => void;
+  setAmplitudeCallback: (cb: AmplitudeCallback | null) => void;
   setPhase: (p: Phase) => void;
   setError: (e: string | null) => void;
   sendMessage: (text: string) => Promise<void>;
@@ -67,19 +87,98 @@ async function fetchTTS(text: string, agent: ProductAgent): Promise<Blob> {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `TTS failed (${res.status})`);
   }
-  return res.blob();
+  const blob = await res.blob();
+  // If the response isn't actually audio (e.g. a JSON error sneaked through),
+  // throw so the caller can handle it gracefully.
+  if (!blob.type.startsWith('audio/') && blob.size < 1000) {
+    const text = await blob.text();
+    throw new Error(text.slice(0, 100) || 'Invalid audio response');
+  }
+  return blob;
+}
+
+/**
+ * Lazily set up the Web Audio API analyser on the first user-initiated
+ * playback. This MUST be called from within a user-gesture call stack
+ * (e.g. the click handler that triggered sendMessage). Returns true if
+ * the analyser is ready (or was already set up).
+ */
+function ensureAnalyser(get: () => AvatarState, set: (fn: Partial<AvatarState>) => void): boolean {
+  const state = get();
+  if (state.analyser && state.audioCtx) return true;
+  if (!state.audioEl) return false;
+  try {
+    const Ctx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return false;
+    const audioCtx = new Ctx();
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.6;
+    const sourceNode = audioCtx.createMediaElementSource(state.audioEl);
+    sourceNode.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    set({ audioCtx, analyser, sourceNode });
+    startAmplitudeLoop(get);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Amplitude sampling loop — runs forever once started, reads the analyser
+ * ~30 times per second and dispatches the current RMS amplitude (0..1) to
+ * the registered amplitudeCallback. The TalkingMouth subscribes to this
+ * so its mouth opening tracks the actual TTS audio loudness in real time.
+ *
+ * Only dispatches when phase === 'speaking' to save CPU when idle.
+ */
+function startAmplitudeLoop(get: () => AvatarState) {
+  const buffer = new Uint8Array(128); // analyser.frequencyBinCount = fftSize/2 = 128
+  const loop = () => {
+    const state = get();
+    if (state.analyser && state.phase === 'speaking' && state.amplitudeCallback) {
+      state.analyser.getByteFrequencyData(buffer);
+      // Compute RMS-ish amplitude from the low-mid frequencies (vocal range).
+      // We use bins 1..40 (~ 90Hz–3.5kHz at 24kHz sample rate) which
+      // captures speech energy well.
+      let sum = 0;
+      let count = 0;
+      for (let i = 1; i < 40 && i < buffer.length; i++) {
+        sum += buffer[i] * buffer[i];
+        count++;
+      }
+      const rms = Math.sqrt(sum / count) / 255; // normalize to 0..1
+      // Apply a curve so quiet speech still moves the mouth but loud peaks
+      // don't max out — gives a more natural range.
+      const shaped = Math.pow(Math.min(rms * 2.2, 1), 0.7);
+      state.amplitudeCallback(shaped);
+    } else if (state.amplitudeCallback && state.phase !== 'speaking') {
+      // When not speaking, send 0 so the mouth rests
+      state.amplitudeCallback(0);
+    }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
 }
 
 export const useAvatarStore = create<AvatarState>((set, get) => ({
   sessionId: typeof window !== 'undefined' ? makeSessionId() : 'ssr',
   currentAvatar: AVATARS[0],
   currentAgent: AGENTS[0],
+  currentLanguage: LANGUAGES[0],
   messages: [],
   phase: 'idle',
   error: null,
   autoSpeak: true,
   muted: false,
   audioEl: null,
+  audioCtx: null,
+  analyser: null,
+  sourceNode: null,
+  amplitudeCallback: null,
 
   setAvatar: (id) => {
     const avatar = getAvatar(id);
@@ -101,6 +200,11 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
     }
   },
 
+  setLanguage: (id) => {
+    const language = getLanguage(id);
+    set({ currentLanguage: language, phase: 'idle', error: null });
+  },
+
   toggleAutoSpeak: () => set((s) => ({ autoSpeak: !s.autoSpeak })),
   toggleMuted: () => {
     const muted = !get().muted;
@@ -108,14 +212,22 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
     if (el) el.muted = muted;
     set({ muted });
   },
-  setAudioEl: (el) => set({ audioEl: el }),
+  setAudioEl: (el) => {
+    // Just store the element — we'll set up the AudioContext lazily on
+    // the first user-initiated play (in playReply), because browsers
+    // require AudioContext + createMediaElementSource to happen in
+    // response to a user gesture. Creating them on mount leaves the
+    // context suspended and breaks audio routing.
+    set({ audioEl: el });
+  },
+  setAmplitudeCallback: (cb) => set({ amplitudeCallback: cb }),
   setPhase: (p) => set({ phase: p }),
   setError: (e) => set({ error: e }),
 
   sendMessage: async (text) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const { sessionId, currentAgent: agent, currentAvatar: avatar, autoSpeak, muted } = get();
+    const { sessionId, currentAgent: agent, currentAvatar: avatar, currentLanguage: language, autoSpeak, muted } = get();
 
     const userMsg: ChatMessage = {
       id: makeId(),
@@ -123,6 +235,7 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
       content: trimmed,
       agentId: agent.id,
       avatarId: avatar.id,
+      languageId: language.id,
       createdAt: Date.now(),
     };
     const pendingAssistantId = makeId();
@@ -132,6 +245,7 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
       content: '',
       agentId: agent.id,
       avatarId: avatar.id,
+      languageId: language.id,
       pendingAudio: autoSpeak && !muted,
       createdAt: Date.now() + 1,
     };
@@ -150,6 +264,7 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
           sessionId,
           agentId: agent.id,
           avatarName: avatar.name,
+          languageId: language.id,
           message: trimmed,
         }),
       });
@@ -184,6 +299,7 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
             content: `\u26a0\ufe0f ${msg}`,
             agentId: agent.id,
             avatarId: avatar.id,
+            languageId: language.id,
             createdAt: Date.now(),
           }),
       }));
@@ -218,6 +334,8 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
 }));
 
 // Helper to fetch TTS, attach audio URL, play, and manage phase state.
+// If TTS fails, we DON'T mark the message as errored — the text is still
+// visible and the user can retry the voice via the Replay button.
 async function playReply(
   messageId: string,
   text: string,
@@ -235,7 +353,7 @@ async function playReply(
       messages: s.messages.map((m) => {
         if (m.id === messageId) {
           if (m.audioUrl) URL.revokeObjectURL(m.audioUrl);
-          return { ...m, audioUrl: url, pendingAudio: false };
+          return { ...m, audioUrl: url, pendingAudio: false, ttsFailed: false };
         }
         return m;
       }),
@@ -246,32 +364,51 @@ async function playReply(
       set({ phase: 'idle' });
       return;
     }
-    el.src = url;
-    el.muted = get().muted;
+    // Set up the Web Audio analyser on the first user-initiated playback.
+    // This MUST happen within the user-gesture call stack (sendMessage →
+    // playReply is triggered by a click). Now that the TTS route returns
+    // clean WAV files (no AIGC chunk), the analyser + playback work together.
+    ensureAnalyser(get, set);
+    // Resume the AudioContext if it's suspended (autoplay policy).
+    const audioCtx = get().audioCtx;
+    if (audioCtx && audioCtx.state === 'suspended') {
+      try {
+        await audioCtx.resume();
+      } catch {
+        // ignore — playback may still work without the analyser
+      }
+    }
+    // Clear any stale error/network state from a previous playback attempt.
+    el.onerror = null;
     el.onended = () => {
       if (get().phase === 'speaking') set({ phase: 'idle' });
     };
+    el.src = url;
+    el.muted = get().muted;
+    el.load();
     el.onerror = () => {
       set({ phase: 'idle', error: 'Audio playback failed.' });
     };
     try {
       await el.play();
-    } catch {
-      // Autoplay may be blocked until the user interacts — fall back to idle
-      set({ phase: 'idle' });
+    } catch (playErr) {
+      console.error('[playReply] audio.play() failed:', playErr);
+      set({ phase: 'idle', error: 'Audio playback failed.' });
     }
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'TTS failed';
+    // TTS failed but the text reply is still visible. Surface a non-fatal
+    // toast-style error so the user knows voice failed and can retry.
+    const msg = err instanceof Error ? err.message : 'Voice generation failed';
     set((s) => ({
       phase: 'idle',
-      error: msg,
+      error: `Voice: ${msg}`,
       messages: s.messages.map((m) =>
-        m.id === messageId ? { ...m, pendingAudio: false } : m
+        m.id === messageId ? { ...m, pendingAudio: false, ttsFailed: true } : m
       ),
     }));
   }
 }
 
 // Re-export for components that still import from store
-export { AGENTS, AVATARS, getAgent, getAvatar, resolveSystemPrompt };
-export type { AgentId, AvatarId, AvatarIdentity, ProductAgent };
+export { AGENTS, AVATARS, LANGUAGES, getAgent, getAvatar, getLanguage, resolveSystemPrompt };
+export type { AgentId, AvatarId, AvatarIdentity, LanguageId, Language, ProductAgent };

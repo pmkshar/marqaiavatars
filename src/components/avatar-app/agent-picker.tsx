@@ -2,22 +2,24 @@
 
 import { motion } from 'framer-motion';
 import {
-  TrendingUp,
-  HeartHandshake,
-  Cpu,
-  Megaphone,
-  PlayCircle,
+  Building2,
+  Users,
+  Handshake,
+  Eye,
+  Layers,
+  MessageSquare,
   type LucideIcon,
 } from 'lucide-react';
 import { AGENTS, type AgentId } from '@/lib/agents';
 import { useAvatarStore } from '@/lib/store';
 
 const ICONS: Record<AgentId, LucideIcon> = {
-  sales: TrendingUp,
-  success: HeartHandshake,
-  tech: Cpu,
-  marketing: Megaphone,
-  demo: PlayCircle,
+  company: Building2,
+  hrms: Users,
+  crm: Handshake,
+  tryon: Eye,
+  erp: Layers,
+  chatbot: MessageSquare,
 };
 
 export function AgentPicker() {
@@ -28,7 +30,7 @@ export function AgentPicker() {
     <div className="w-full">
       <div
         role="tablist"
-        aria-label="Choose a product voice agent"
+        aria-label="Choose a MARQ AI Tech product specialist"
         className="flex gap-2 overflow-x-auto pb-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {AGENTS.map((agent) => {

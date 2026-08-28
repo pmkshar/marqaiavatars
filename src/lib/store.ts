@@ -1,7 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
-import { AGENTS, resolveSystemPrompt, type AgentId, type ProductAgent } from './agents';
+import { AGENTS, resolveSystemPrompt, resolveIntroduction, type AgentId, type ProductAgent } from './agents';
 import { AVATARS, getAvatar, type AvatarId, type AvatarIdentity } from './avatars';
 import { LANGUAGES, getLanguage, type LanguageId, type Language } from './languages';
 
@@ -46,6 +46,8 @@ interface AvatarState {
   analyser: AnalyserNode | null;
   sourceNode: MediaElementAudioSourceNode | null;
   amplitudeCallback: AmplitudeCallback | null;
+  // Track which agents have been introduced (so we don't repeat the intro)
+  introducedAgents: Set<AgentId>;
 
   setAvatar: (id: AvatarId) => void;
   setAgent: (id: AgentId) => void;
@@ -58,6 +60,7 @@ interface AvatarState {
   setError: (e: string | null) => void;
   sendMessage: (text: string) => Promise<void>;
   replay: (messageId: string) => Promise<void>;
+  playIntroduction: () => Promise<void>;
   stopSpeaking: () => void;
   clearChat: () => void;
 }
@@ -167,7 +170,7 @@ function startAmplitudeLoop(get: () => AvatarState) {
 export const useAvatarStore = create<AvatarState>((set, get) => ({
   sessionId: typeof window !== 'undefined' ? makeSessionId() : 'ssr',
   currentAvatar: AVATARS[0],
-  currentAgent: AGENTS[0],
+  currentAgent: AGENTS.find((a) => a.id === 'company') ?? AGENTS[0],
   currentLanguage: LANGUAGES[0],
   messages: [],
   phase: 'idle',
@@ -179,6 +182,7 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
   analyser: null,
   sourceNode: null,
   amplitudeCallback: null,
+  introducedAgents: new Set(),
 
   setAvatar: (id) => {
     const avatar = getAvatar(id);
@@ -198,6 +202,10 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
       el.pause();
       el.currentTime = 0;
     }
+    // Trigger the agent's spoken introduction (async, non-blocking)
+    setTimeout(() => {
+      get().playIntroduction();
+    }, 300);
   },
 
   setLanguage: (id) => {
@@ -314,11 +322,42 @@ export const useAvatarStore = create<AvatarState>((set, get) => ({
     await playReply(messageId, msg.content, currentAgent, set, get);
   },
 
+  playIntroduction: async () => {
+    const { currentAgent: agent, currentAvatar: avatar, currentLanguage: language, muted, autoSpeak } = get();
+    if (muted || !autoSpeak) return;
+    // Check if this agent was already introduced in this session
+    if (get().introducedAgents?.has(agent.id)) return;
+    // Mark as introduced
+    set((s) => ({
+      introducedAgents: new Set(s.introducedAgents || []).add(agent.id),
+    }));
+    const introText = resolveIntroduction(agent, avatar.name);
+    const introMsg: ChatMessage = {
+      id: makeId(),
+      role: 'assistant',
+      content: introText,
+      agentId: agent.id,
+      avatarId: avatar.id,
+      languageId: language.id,
+      pendingAudio: true,
+      createdAt: Date.now(),
+    };
+    set((s) => ({
+      messages: [...s.messages, introMsg],
+      phase: 'speaking',
+      error: null,
+    }));
+    await playReply(introMsg.id, introText, agent, set, get);
+  },
+
   stopSpeaking: () => {
     const el = get().audioEl;
     if (el) {
       el.pause();
       el.currentTime = 0;
+    }
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
     }
     set({ phase: 'idle' });
   },

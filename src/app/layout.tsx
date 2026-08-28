@@ -15,35 +15,41 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Polymath Avatar — One Face, Many Voices",
+  title: "MARQ AI Tech — AI Avatar Voice Agents",
   description:
-    "An AI avatar that transforms into different voice agents for different products. Powered by Z.ai LLM, TTS, and VLM.",
+    "MARQ AI Tech Pvt Ltd — AI avatar voice agents for our products: 3 Boxes HRMS, AI CRM, Virtual Try-On, AI ERP, AI Assist. Voice chat in 5 Indian languages.",
   keywords: [
+    "MARQ AI Tech",
+    "3 Boxes HRMS",
+    "AI CRM",
+    "Virtual Try-On",
+    "AI ERP",
     "AI avatar",
     "voice agent",
-    "Z.ai",
+    "voice chat",
+    "Hindi TTS",
+    "Telugu TTS",
+    "Tamil TTS",
     "Next.js",
-    "TTS",
-    "LLM",
-    "product assistant",
   ],
-  authors: [{ name: "Built with Z.ai" }],
+  authors: [{ name: "MARQ AI Tech Pvt Ltd" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/marq-logo.png",
+    apple: "/marq-logo.png",
   },
   openGraph: {
-    title: "Polymath Avatar — One Face, Many Voices",
+    title: "MARQ AI Tech — AI Avatar Voice Agents",
     description:
-      "An AI avatar that transforms into different voice agents for different products.",
-    url: "https://chat.z.ai",
-    siteName: "Polymath Avatar",
+      "AI avatar voice agents for MARQ AI Tech products. Voice chat with lip-sync in 5 Indian languages.",
+    url: "https://marqaitech.com",
+    siteName: "MARQ AI Tech",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Polymath Avatar",
+    title: "MARQ AI Tech",
     description:
-      "An AI avatar that transforms into different voice agents for different products.",
+      "AI avatar voice agents for MARQ AI Tech products with voice chat and 5 Indian languages.",
   },
 };
 

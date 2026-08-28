@@ -39,7 +39,11 @@ export async function POST(req: NextRequest) {
     // language using the appropriate script.
     const systemPrompt = `${resolveSystemPrompt(agent, displayName)}
 
-LANGUAGE: ${language.instruction}`;
+LANGUAGE: ${language.instruction}
+
+LENGTH: ${language.id === 'en'
+  ? 'Keep replies concise: 2–4 short paragraphs maximum.'
+  : 'Keep replies SHORT: 2–3 short sentences (about 40–60 words). Avoid long bulleted lists. This makes voice synthesis more reliable.'}`;
 
     const zai = await ZAI.create();
 

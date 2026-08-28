@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
 import { getAgent } from '@/lib/agents';
+import { transliterateToRoman } from '@/lib/transliterate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+// Indic languages need transliteration to Roman for the Z.ai TTS (Chinese/English voices)
+const INDIC_LANGUAGES = new Set(['hi', 'ta', 'te', 'kn']);
 
 /**
  * Split text into chunks at sentence boundaries. The TTS API is
@@ -207,19 +211,25 @@ async function generateChunkWithRetry(
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, agentId, voice, speed } = await req.json();
+    const { text, agentId, voice, speed, languageId } = await req.json();
 
     if (!text || typeof text !== 'string') {
       return NextResponse.json({ error: 'text is required' }, { status: 400 });
     }
 
     const agent = getAgent(agentId);
-    const finalVoice = voice || agent.voice;
-    const finalSpeed = typeof speed === 'number' ? speed : agent.speed;
+    // For Indic languages, use the English `jam` voice with transliterated text
+    // (Z.ai TTS has no Indian voices — Chinese voices mispronounce Indic script)
+    const isIndic = languageId && INDIC_LANGUAGES.has(languageId);
+    const finalVoice = isIndic ? 'jam' : (voice || agent.voice);
+    const finalSpeed = isIndic ? 0.95 : (typeof speed === 'number' ? speed : agent.speed);
+
+    // Transliterate Indic script to Roman for the Z.ai fallback
+    const ttsText = isIndic ? transliterateToRoman(text, languageId) : text;
 
     const zai = await ZAI.create();
 
-    const chunks = splitText(text, 180);
+    const chunks = splitText(ttsText, 180);
     const blobs: Buffer[] = [];
     const failedChunks: number[] = [];
 

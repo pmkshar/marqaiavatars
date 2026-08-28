@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { AGENTS, resolveSystemPrompt, resolveIntroduction, type AgentId, type ProductAgent } from './agents';
 import { AVATARS, getAvatar, type AvatarId, type AvatarIdentity } from './avatars';
 import { LANGUAGES, getLanguage, type LanguageId, type Language } from './languages';
+import { fetchCloudTTS } from './cloud-tts';
 
 export interface ChatMessage {
   id: string;
@@ -80,19 +81,17 @@ function makeSessionId() {
   return id;
 }
 
-async function fetchTTS(text: string, agent: ProductAgent): Promise<Blob> {
+async function fetchTTS(text: string, agent: ProductAgent, languageId: string): Promise<Blob> {
   const res = await fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, agentId: agent.id, voice: agent.voice, speed: agent.speed }),
+    body: JSON.stringify({ text, agentId: agent.id, voice: agent.voice, speed: agent.speed, languageId }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `TTS failed (${res.status})`);
   }
   const blob = await res.blob();
-  // If the response isn't actually audio (e.g. a JSON error sneaked through),
-  // throw so the caller can handle it gracefully.
   if (!blob.type.startsWith('audio/') && blob.size < 1000) {
     const text = await blob.text();
     throw new Error(text.slice(0, 100) || 'Invalid audio response');
@@ -383,10 +382,47 @@ async function playReply(
   get: () => AvatarState
 ) {
   set({ phase: 'speaking' });
-  try {
-    const blob = await fetchTTS(text, agent);
-    const url = URL.createObjectURL(blob);
+  const languageId = get().currentLanguage.id;
 
+  // ── Path 1: Cloud TTS (Google Translate TTS — native pronunciation) ──
+  // PRIMARY path for ALL languages including English. More reliable than
+  // Z.ai TTS (which has only Chinese/English voices and rate-limits on long text).
+  try {
+    const blob = await fetchCloudTTS(text, languageId);
+    const url = URL.createObjectURL(blob);
+    await playAudioBlob(url, messageId, set, get);
+    return;
+  } catch (err) {
+    console.warn('[playReply] cloud TTS failed, falling back to Z.ai TTS:', err);
+  }
+
+  // ── Path 2: Z.ai TTS API (last resort) ────────────────────────────
+  try {
+    const blob = await fetchTTS(text, agent, languageId);
+    const url = URL.createObjectURL(blob);
+    await playAudioBlob(url, messageId, set, get);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Voice generation failed';
+    set((s) => ({
+      phase: 'idle',
+      error: `Voice temporarily unavailable. The text reply is shown above — click "Replay voice" to try again.`,
+      messages: s.messages.map((m) =>
+        m.id === messageId ? { ...m, pendingAudio: false, ttsFailed: true } : m
+      ),
+    }));
+  }
+}
+
+/**
+ * Play an audio blob through the <audio> element with amplitude lip sync.
+ */
+async function playAudioBlob(
+  url: string,
+  messageId: string,
+  set: (fn: Partial<AvatarState> | ((s: AvatarState) => Partial<AvatarState>)) => void,
+  get: () => AvatarState
+) {
+  try {
     // Revoke any old audio URL on this message
     set((s) => ({
       messages: s.messages.map((m) => {
@@ -403,21 +439,11 @@ async function playReply(
       set({ phase: 'idle' });
       return;
     }
-    // Set up the Web Audio analyser on the first user-initiated playback.
-    // This MUST happen within the user-gesture call stack (sendMessage →
-    // playReply is triggered by a click). Now that the TTS route returns
-    // clean WAV files (no AIGC chunk), the analyser + playback work together.
     ensureAnalyser(get, set);
-    // Resume the AudioContext if it's suspended (autoplay policy).
     const audioCtx = get().audioCtx;
     if (audioCtx && audioCtx.state === 'suspended') {
-      try {
-        await audioCtx.resume();
-      } catch {
-        // ignore — playback may still work without the analyser
-      }
+      try { await audioCtx.resume(); } catch {}
     }
-    // Clear any stale error/network state from a previous playback attempt.
     el.onerror = null;
     el.onended = () => {
       if (get().phase === 'speaking') set({ phase: 'idle' });
@@ -435,16 +461,8 @@ async function playReply(
       set({ phase: 'idle', error: 'Audio playback failed.' });
     }
   } catch (err: unknown) {
-    // TTS failed but the text reply is still visible. Surface a non-fatal
-    // toast-style error so the user knows voice failed and can retry.
-    const msg = err instanceof Error ? err.message : 'Voice generation failed';
-    set((s) => ({
-      phase: 'idle',
-      error: `Voice: ${msg}`,
-      messages: s.messages.map((m) =>
-        m.id === messageId ? { ...m, pendingAudio: false, ttsFailed: true } : m
-      ),
-    }));
+    const msg = err instanceof Error ? err.message : 'Audio playback failed';
+    set({ phase: 'idle', error: msg });
   }
 }
 
